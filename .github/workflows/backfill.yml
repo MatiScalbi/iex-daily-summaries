@@ -1,0 +1,69 @@
+name: backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First month (YYYY-MM)"
+        default: "2017-01"
+      end:
+        description: "Last month (YYYY-MM)"
+        default: "2026-10"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      chunks: ${{ steps.plan.outputs.chunks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - id: plan
+        run: python plan.py "${{ inputs.start }}" "${{ inputs.end }}" >> "$GITHUB_OUTPUT"
+
+  summarize:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        chunk: ${{ fromJson(needs.plan.outputs.chunks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python summarize.py "${{ matrix.chunk.start }}" "${{ matrix.chunk.end }}" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: days-${{ matrix.chunk.start }}
+          path: out/*.parquet
+          if-no-files-found: ignore
+          retention-days: 7
+
+  collect:
+    needs: summarize
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: days-*
+          merge-multiple: true
+          path: data/daily
+      - name: Commit summaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/daily
+          git diff --cached --quiet || git commit -m "data: backfill ${{ inputs.start }}..${{ inputs.end }}"
+          git push

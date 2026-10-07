@@ -1,0 +1,29 @@
+name: daily
+
+on:
+  schedule:
+    # IEX publishes the previous session's files overnight; run Tue-Sat morning UTC.
+    - cron: "23 11 * * 2-6"
+  workflow_dispatch:
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Summarize the last 7 days (fills any gap)
+        run: python summarize.py "$(date -u -d '7 days ago' +%F)" "$(date -u -d 'yesterday' +%F)" data/daily
+      - name: Commit summaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/daily
+          git diff --cached --quiet || git commit -m "data: daily $(date -u +%F)"
+          git push
