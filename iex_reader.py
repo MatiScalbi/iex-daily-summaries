@@ -193,6 +193,8 @@ def list_files(date: str, session: requests.Session | None = None) -> list[dict]
     """HIST files for YYYYMMDD (empty list on non-trading days)."""
     s = session or requests.Session()
     resp = s.get(HIST_URL.format(date=date), timeout=60)
+    if resp.status_code == 404:  # IEX answers 404 for non-trading days
+        return []
     resp.raise_for_status()
     data = resp.json()
     return data if isinstance(data, list) else []
