@@ -15,13 +15,21 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: days-*
-          merge-multiple: true
-          path: data/daily
-          run-id: ${{ inputs.run_id }}
-          github-token: ${{ github.token }}
+      - name: Download artifacts one by one (avoids secondary rate limits)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tmp_artifacts
+          names=$(gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }}/artifacts?per_page=100" --jq '.artifacts[].name')
+          for n in $names; do
+            for attempt in 1 2 3 4 5; do
+              gh run download "${{ inputs.run_id }}" -n "$n" -D "tmp_artifacts/$n" && break
+              sleep $((attempt * 20))
+            done
+            sleep 1
+          done
+          find tmp_artifacts -name '*.parquet' -exec cp -n {} data/daily/ \;
+          rm -rf tmp_artifacts
       - name: Commit summaries
         run: |
           ls data/daily | wc -l
